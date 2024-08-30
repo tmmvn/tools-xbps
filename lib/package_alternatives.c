@@ -116,17 +116,17 @@ static int
 remove_symlinks(struct xbps_handle *xhp, xbps_array_t a, const char *grname)
 {
 	unsigned int i, cnt;
-	struct stat st;
-
 	cnt = xbps_array_count(a);
-	for (i = 0; i < cnt; i++) {
+	for(i = 0; i < cnt; i++)
+	{
 		xbps_string_t str;
 		char *l, *lnk;
-
+		int fd;
 		str = xbps_array_get(a, i);
 		l = left(xbps_string_cstring_nocopy(str));
 		assert(l);
-		if (l[0] != '/') {
+		if(l[0] != '/')
+		{
 			const char *tgt;
 			char *tgt_dup, *tgt_dir;
 			tgt = right(xbps_string_cstring_nocopy(str));
@@ -135,21 +135,40 @@ remove_symlinks(struct xbps_handle *xhp, xbps_array_t a, const char *grname)
 			tgt_dir = dirname(tgt_dup);
 			lnk = xbps_xasprintf("%s%s/%s", xhp->rootdir, tgt_dir, l);
 			free(tgt_dup);
-		} else {
+		}
+		else
+		{
 			lnk = xbps_xasprintf("%s%s", xhp->rootdir, l);
 		}
-		if (lstat(lnk, &st) == -1 || !S_ISLNK(st.st_mode)) {
+		fd = open(lnk, O_PATH | O_NOFOLLOW);
+		if(fd == -1)
+		{
 			free(lnk);
 			free(l);
-			continue;
+			if (errno == ENOENT)
+			{
+				continue;
+			}
+			else
+			{
+				perror("open");
+				return -1;
+			}
+		}
+		if(unlinkat(AT_FDCWD, lnk, AT_REMOVEDIR) == -1)
+		{
+			perror("unlinkat");
+			close(fd);
+			free(lnk);
+			free(l);
+			return -1;
 		}
 		xbps_set_cb_state(xhp, XBPS_STATE_ALTGROUP_LINK_REMOVED, 0, NULL,
-		    "Removing '%s' alternatives group symlink: %s", grname, l);
-		unlink(lnk);
+		"Removing '%s' alternatives group symlink: %s", grname, l);
+		close(fd);
 		free(lnk);
 		free(l);
 	}
-
 	return 0;
 }
 

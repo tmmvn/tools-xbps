@@ -302,13 +302,31 @@ unpack_archive(struct xbps_handle *xhp,
 		}
 
 		/*
-		 * If file to be extracted does not match the file type of
-		 * file currently stored on disk and is not a conf file
-		 * that should be kept, remove file on disk.
-		 */
-		if (file_exists && !keep_conf_file &&
-		    ((entry_statp->st_mode & S_IFMT) != (st.st_mode & S_IFMT)))
-			(void)remove(entry_pname);
+		* If file to be extracted does not match the file type of
+		* file currently stored on disk and is not a conf file
+		* that should be kept, remove file on disk.
+		*/
+		if(file_exists && !keep_conf_file &&
+		((entry_statp->st_mode & S_IFMT) != (st.st_mode & S_IFMT)))
+		{
+			int fd = open(entry_pname, O_PATH | O_NOFOLLOW);
+			if(fd == -1)
+			{
+				// Handle error (log, etc.)
+				perror("open");
+				rv = errno; // Assuming you want to return an error
+				goto out;
+			}
+			if(unlinkat(AT_FDCWD, entry_pname, AT_REMOVEDIR) == -1)
+			{
+				// Handle error (log, etc.)
+				perror("unlinkat");
+				close(fd);
+				rv = errno; // Assuming you want to return an error
+				goto out;
+			}
+			close(fd);
+		}
 
 		if (!force && (entry_type == AE_IFREG)) {
 			if (file_exists && (S_ISREG(st.st_mode) || S_ISLNK(st.st_mode))) {
@@ -385,25 +403,33 @@ unpack_archive(struct xbps_handle *xhp,
 			}
 		}
 		/*
-		 * Check if current file mode differs from file mode
-		 * in binpkg and apply perms if true.
-		 */
-		if (!force && file_exists && skip_extract &&
-		    (archive_entry_mode(entry) != st.st_mode)) {
-			if (chmod(entry_pname,
-			    archive_entry_mode(entry)) != 0) {
-				xbps_dbg_printf(
-				    "%s: failed "
-				    "to set perms %s to %s: %s\n",
-				    pkgver, archive_entry_strmode(entry),
-				    entry_pname,
-				    strerror(errno));
-				rv = EINVAL;
+		* Check if current file mode differs from file mode
+		* in binpkg and apply perms if true.
+		*/
+		if(!force && file_exists && skip_extract &&
+		(archive_entry_mode(entry) != st.st_mode))
+		{
+			int fd = open(entry_pname, O_PATH | O_NOFOLLOW);
+			if(fd == -1)
+			{
+				// Handle error (log, etc.)
+				perror("open");
+				rv = errno;
 				goto out;
 			}
-			xbps_dbg_printf("%s: entry %s changed file "
-			    "mode to %s.\n", pkgver, entry_pname,
-			    archive_entry_strmode(entry));
+			if(fchmodat(fd, "", archive_entry_mode(entry), 0) != 0)
+			{
+				xbps_dbg_printf(
+					"%s: failed to set perms %s to %s: %s\n",
+					pkgver, archive_entry_strmode(entry),
+					entry_pname, strerror(errno));
+			rv = EINVAL;
+			close(fd);
+			goto out;
+			}
+			xbps_dbg_printf("%s: entry %s changed file mode to %s.\n",
+				pkgver, entry_pname, archive_entry_strmode(entry));
+			close(fd);
 		}
 		if (!force && skip_extract) {
 			archive_read_data_skip(ar);
